@@ -20,6 +20,7 @@ from pyrocko.guts import (StringChoice, StringPattern, UnicodePattern, String,
                           Unicode, Int, Float, List, Object, Timestamp,
                           ValidationError, TBase)
 from pyrocko.guts import load_xml  # noqa
+from pyrocko.util import hpfloat, time_to_str
 
 import pyrocko.model
 from pyrocko import trace, util
@@ -82,24 +83,24 @@ this_year = time.gmtime()[0]
 
 
 class DummyAwareOptionalTimestamp(Object):
-    dummy_for = float
+    dummy_for = (hpfloat, float)
 
     class __T(TBase):
 
         def regularize_extra(self, val):
             if isinstance(val, datetime.datetime):
                 tt = val.utctimetuple()
-                val = calendar.timegm(tt) + val.microsecond * 1e-6
+                val = hpfloat(calendar.timegm(tt)) + val.microsecond * 1e-6
 
             elif isinstance(val, datetime.date):
                 tt = val.timetuple()
-                val = float(calendar.timegm(tt))
+                val = hpfloat(calendar.timegm(tt))
 
             elif isinstance(val, (str, newstr)):
                 val = val.strip()
 
                 val = re.sub(r'(Z|\+00(:?00)?)$', '', val)
-                if val[10] == 'T':
+                if len(val) > 10 and val[10] == 'T':
                     val = val.replace('T', ' ', 1)
 
                 try:
@@ -117,8 +118,8 @@ class DummyAwareOptionalTimestamp(Object):
 
                     raise
 
-            elif isinstance(val, int):
-                val = float(val)
+            elif isinstance(val, (int, float)):
+                val = hpfloat(val)
 
             else:
                 raise ValidationError(
@@ -127,10 +128,12 @@ class DummyAwareOptionalTimestamp(Object):
             return val
 
         def to_save(self, val):
-            return datetime.datetime.utcfromtimestamp(val)
+            return time_to_str(val, format='%Y-%m-%d %H:%M:%S.9FRAC')\
+                .rstrip('0').rstrip('.')
 
         def to_save_xml(self, val):
-            return datetime.datetime.utcfromtimestamp(val).isoformat() + 'Z'
+            return time_to_str(val, format='%Y-%m-%dT%H:%M:%S.9FRAC')\
+                .rstrip('0').rstrip('.') + 'Z'
 
 
 class Nominal(StringChoice):

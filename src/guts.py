@@ -422,16 +422,17 @@ class TBase(object):
 
         validator = self
         if isinstance(self.cls, tuple):
-            for cls in self.cls:
+            clss = self.cls
+        else:
+            clss = (self.cls,)
+
+        for cls in clss:
+            try:
                 if type(val) != cls and isinstance(val, cls):
                     validator = val.T.instance
 
-        else:
-            if type(val) != self.cls \
-                    and isinstance(val, self.cls) and \
-                    hasattr(val, 'T'):
-                # derived classes only: validate with derived class validator
-                validator = val.T.instance
+            except AttributeError:
+                pass
 
         validator.validate_extra(val)
 
@@ -1059,9 +1060,10 @@ class Timestamp(Object):
     class __T(TBase):
 
         def regularize_extra(self, val):
+
             if isinstance(val, datetime.datetime):
                 tt = val.utctimetuple()
-                val = calendar.timegm(tt) + val.microsecond * 1e-6
+                val = hpfloat(calendar.timegm(tt)) + val.microsecond * 1e-6
 
             elif isinstance(val, datetime.date):
                 tt = val.timetuple()
@@ -1089,14 +1091,16 @@ class Timestamp(Object):
             return val
 
         def to_save(self, val):
-            return datetime.datetime.utcfromtimestamp(val)
+            return time_to_str(val, format='%Y-%m-%d %H:%M:%S.9FRAC')\
+                .rstrip('0').rstrip('.')
 
         def to_save_xml(self, val):
-            return datetime.datetime.utcfromtimestamp(val).isoformat() + 'Z'
+            return time_to_str(val, format='%Y-%m-%dT%H:%M:%S.9FRAC')\
+                .rstrip('0').rstrip('.') + 'Z'
 
 
 class DateTimestamp(Object):
-    dummy_for = float
+    dummy_for = (hpfloat, float)
 
     class __T(TBase):
 
@@ -1292,16 +1296,27 @@ class Choice(Object):
                         raise ValidationError(
                             '%s: could not convert "%s" to any type out of '
                             '(%s)' % (self.xname(), val, ','.join(
-                                x.cls.__name__ for x in self.choices)))
+                                classnames(x.cls) for x in self.choices)))
                 else:
                     raise ValidationError(
                         '%s: "%s" (type: %s) is not of any type out of '
                         '(%s)' % (self.xname(), val, type(val), ','.join(
-                            x.cls.__name__ for x in self.choices)))
+                            classnames(x.cls) for x in self.choices)))
 
             validator = t
-            if type(val) != t.cls and isinstance(val, t.cls):
-                validator = val.T.instance
+
+            if isinstance(t.cls, tuple):
+                clss = t.cls
+            else:
+                clss = (t.cls,)
+
+            for cls in clss:
+                try:
+                    if type(val) != cls and isinstance(val, cls):
+                        validator = val.T.instance
+
+                except AttributeError:
+                    pass
 
             validator.validate_extra(val)
 

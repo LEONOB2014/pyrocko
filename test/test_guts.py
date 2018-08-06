@@ -6,8 +6,10 @@ import math
 import re
 import sys
 import datetime
+import time
 from contextlib import contextmanager
 
+import numpy as num
 
 from pyrocko.guts import StringPattern, Object, Bool, Int, Float, String, \
     SObject, Unicode, Complex, Timestamp, DateTimestamp, StringChoice, Defer, \
@@ -15,6 +17,8 @@ from pyrocko.guts import StringPattern, Object, Bool, Int, Float, String, \
     load, load_string, load_xml_string, load_xml, load_all, iload_all, \
     load_all_xml, iload_all_xml, dump, dump_xml, dump_all, dump_all_xml, \
     make_typed_list_class, walk, zip_walk, path_to_str, clone
+
+from pyrocko.util import hpfloat
 
 
 guts_prefix = 'guts_test'
@@ -34,7 +38,7 @@ basic_types = (
 
 
 def tstamp(*args):
-    return float(calendar.timegm(args))
+    return hpfloat(calendar.timegm(args))
 
 
 samples = {}
@@ -1120,6 +1124,24 @@ xmlns:f="https://www.w3schools.com/furniture">
 
         o3 = load_xml(string=s2, ns_hints=['', 'http://www.w3.org/TR/html4/'])
         assert isinstance(o3.tables1[0], Table1)
+
+    def testTimestamp(self):
+
+        class X(Object):
+            t = Timestamp.T()
+
+        now = num.floor(hpfloat(time.time()))
+
+        x = X(t=now)
+        x2 = load_string(x.dump())
+
+        assert isinstance(x2.t, hpfloat)
+
+        x3 = load_string('''--- !guts_test.X
+t: 2018-08-06 12:53:20
+''')
+        assert isinstance(x3.t, hpfloat)
+
 
 
 def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
