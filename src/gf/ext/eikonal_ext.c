@@ -125,11 +125,29 @@ static eikonal_error_t heap_push(heap_t *heap, size_t index, double *keys, size_
 
 static size_t heap_pop(heap_t *heap, double *keys, size_t *backpointers) {
     size_t index;
-    heap->n -= 1;
+    if (heap->n == 0) return (size_t)-1;
     swap(&(heap->indices[0]), &(heap->indices[heap->n-1]))
     swap(&(backpointers[heap->indices[0]]), &(backpointers[heap->indices[heap->n-1]]));
     index = heap->indices[n]
+    heap->n -= 1;
+
+    heap_down(heap, 1, keys, backpointers)
 }
+
+static heap_update(heap_t *heap, index, newkey, keys, backpointers)
+    double oldkey;
+
+    oldkey = keys[index];
+    keys[index] = newkey
+
+    if (newkey < oldkey) {
+        call heap_up(heap, backpointers(index), keys, backpointers)
+    }
+
+    if (newkey > oldkey) {
+        call heap_down(heap, backpointers[index], keys, backpointers)
+    }
+
 
 static eikonal_error_t eikonal_solver_fmm_cartesian(
         double *speeds,
