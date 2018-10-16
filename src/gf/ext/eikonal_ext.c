@@ -18,6 +18,9 @@
     #include <omp.h>
 #endif
 
+#include <limits.h>
+#include <float.h>
+
 struct module_state {
     PyObject *error;
 };
@@ -70,15 +73,24 @@ int good_array(PyObject* o, int typenum_want, npy_intp size_want, int ndim_want,
 typedef enum {
     SUCCESS = 0,
     MALLOC_FAILED = 1,
-    HEAP_FULL = 2
+    HEAP_FULL = 2,
+    HEAP_EMPTY = 3,
+    NO_SEED_POINTS = 4,
 } eikonal_error_t;
 
 const char* eikonal_error_names[] = {
     "success",
     "memory allocation failed",
     "heap capacity exhausted",
+    "heap drained prematurely",
+    "no seeding points given",
 };
 
+#define NDIM_MAX 3
+
+static const size_t FARAWAY = SIZE_MAX;
+static const size_t ALIVE = SIZE_MAX-1;
+static const double THUGE = DBL_MAX;
 
 typedef struct {
     size_t *indices;
@@ -86,6 +98,16 @@ typedef struct {
     size_t nmax;
 } heap_t;
 
+static void swap(size_t *a, size_t *b) { 
+    size_t t;
+    t = *a;
+    *a = *b;
+    *b = t;
+}
+
+static double min(double a, double b) {
+    return (a < b) ? a : b;
+}
 
 static heap_t *heap_new(size_t nmax) {
     heap_t *heap;
@@ -112,6 +134,39 @@ static void heap_delete(heap_t *heap) {
     free(heap);
 }
 
+static void heap_down(heap_t *heap, size_t index, double *keys, size_t *backpointers) {
+    size_t v, w;
+    v = index;
+    w = 2*v + 1;  /* first dscendant of v */
+    while (w < heap->n) {
+        /* if w has second descendant and it is greater take that one */
+        if (w+1 < heap->n && keys[heap->indices[w+1]] < keys[heap->indices[w]]) w = w + 1;
+
+        /* w points to largest descendant */
+        if (keys[heap->indices[v]] < keys[heap->indices[w]]) return; /* v has heap property */
+
+        swap(&(heap->indices[v]), &(heap->indices[w]));
+        swap(&(backpointers[heap->indices[v]]), &(backpointers[heap->indices[w]]));
+
+        v = w;
+        w = 2*v + 1;
+    }
+}
+
+static void heap_up(heap_t *heap, size_t index, double *keys, size_t *backpointers) {
+    size_t v, u;
+    v = index;
+    while (v > 0) {
+        u = (v-1)/2;  /* parent */
+        if (keys[heap->indices[u]] < keys[heap->indices[v]]) return; /* u has heap property */
+
+        swap(&(heap->indices[v]), &(heap->indices[u]));
+        swap(&(backpointers[heap->indices[v]]), &(backpointers[heap->indices[u]]));
+
+        v = u;
+    }
+}
+
 static eikonal_error_t heap_push(heap_t *heap, size_t index, double *keys, size_t *backpointers) {
     if (heap->n + 1 > heap->nmax) {
         return HEAP_FULL;
@@ -121,44 +176,97 @@ static eikonal_error_t heap_push(heap_t *heap, size_t index, double *keys, size_
     heap->indices[heap->n - 1] = index;
     backpointers[index] = heap->n - 1;
     heap_up(heap, heap->n - 1, keys, backpointers);
+    return SUCCESS;
 }
 
 static size_t heap_pop(heap_t *heap, double *keys, size_t *backpointers) {
     size_t index;
-    if (heap->n == 0) return (size_t)-1;
-    swap(&(heap->indices[0]), &(heap->indices[heap->n-1]))
-    swap(&(backpointers[heap->indices[0]]), &(backpointers[heap->indices[heap->n-1]]));
-    index = heap->indices[n]
+    if (heap->n == 0) return SIZE_MAX;
+    swap(&(heap->indices[0]), &(heap->indices[heap->n - 1]));
+    swap(&(backpointers[heap->indices[0]]),
+         &(backpointers[heap->indices[heap->n - 1]]));
+    index = heap->indices[heap->n - 1];
     heap->n -= 1;
-
-    heap_down(heap, 1, keys, backpointers)
+    heap_down(heap, 0, keys, backpointers);
+    return index;
 }
 
-static heap_update(heap_t *heap, index, newkey, keys, backpointers)
+static void heap_update(heap_t *heap, size_t index, double newkey, double *keys, size_t *backpointers) {
     double oldkey;
 
     oldkey = keys[index];
-    keys[index] = newkey
+    keys[index] = newkey;
 
-    if (newkey < oldkey) {
-        call heap_up(heap, backpointers(index), keys, backpointers)
+    if (newkey < oldkey) heap_up(heap, backpointers[index], keys, backpointers);
+    if (newkey > oldkey) heap_down(heap, backpointers[index], keys, backpointers);
+}
+
+static void update_neighbor(
+        size_t index, double *speeds, size_t ndim, size_t *shape, double delta,
+        double *times, size_t *backpointers, heap_t *heap) {
+
+    double s1, s2, tnew, d;
+    double tmins[NDIM_MAX];
+    size_t idim, ndim_eff, ix, stride;
+
+    //printf("upd: %zi\n", index);
+
+    if (backpointers[index] == ALIVE) return;
+    if (backpointers[index] == FARAWAY) {
+        heap_push(heap, index, times, backpointers);
     }
 
-    if (newkey > oldkey) {
-        call heap_down(heap, backpointers[index], keys, backpointers)
+    stride = 1;
+    for (idim=ndim; idim-- > 0;) {
+        ix = (index / stride) % shape[idim];
+        //printf("ix: %zi %zi %zi %zi\n", index, stride, ix, shape[idim]);
+        tmins[idim] = THUGE;
+        if (1 <= ix) tmins[idim] = 
+            (backpointers[index-stride] == ALIVE) ? times[index-stride] : THUGE;
+        if (ix+1 < shape[idim]) tmins[idim] = min(tmins[idim],
+            (backpointers[index+stride] == ALIVE) ? times[index+stride] : THUGE);
+
+        stride *= shape[idim];
     }
 
+    s1 = 0.0;
+    s2 = 0.0;
+    ndim_eff = 0;
+    for (idim=0; idim<ndim; idim++) {
+        if (tmins[idim] != THUGE) {
+            s1 += tmins[idim];
+            s2 += tmins[idim]*tmins[idim];
+            ndim_eff += 1;
+        }
+    }
+
+    // check for abs(tmins[ia] - tmins[ib]) <= deltah/speed
+    
+    d = s1*s1 - ndim_eff*(s2-delta*delta/(speeds[index]*speeds[index]));
+    if (d >= 0) {
+        tnew = 1.0/ndim_eff * (s1+sqrt(d));
+    } else {
+        tnew = 0.0;
+        printf("hups");
+    }
+    heap_update(heap, index, tnew, times, backpointers);
+}
 
 static eikonal_error_t eikonal_solver_fmm_cartesian(
         double *speeds,
         size_t ndim,
         size_t *shape,
-        double *deltas,
+        double delta,
         double *times) {
 
     heap_t *heap;
     size_t idim;
-    size_t n;
+    size_t n, i;
+    size_t *backpointers;
+    size_t nalive;
+    size_t index;
+    size_t stride;
+    size_t ix;
 
     n = 1;
     for (idim=0; idim<ndim; idim++) {
@@ -170,36 +278,75 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
         return MALLOC_FAILED;
     }
 
+    backpointers = (size_t*)calloc(n, sizeof(size_t));
+    if (backpointers == NULL) {
+        heap_delete(heap);
+        return MALLOC_FAILED;
+    }
 
-    (void) speeds;
-    (void) deltas;
-    (void) times;
+    nalive = 0;
+    for (i=0; i<n; i++) {
+        if (times[i] < 0) {
+            backpointers[i] = FARAWAY;
+            times[i] = THUGE;
+        } else {
+            backpointers[i] = ALIVE;
+            nalive += 1;
+            heap_push(heap, i, times, backpointers);
+        }
+    }
 
+    if (nalive == 0) return NO_SEED_POINTS;
+
+    while (nalive < n) {
+        index = heap_pop(heap, times, backpointers);
+        if (index == SIZE_MAX) return HEAP_EMPTY;
+        if (backpointers[index] != ALIVE) nalive += 1;
+
+        printf("pop: %zi %zi %f\n", index, nalive, times[index]);
+
+        backpointers[index] = ALIVE;
+
+        stride = 1;
+        for (idim=ndim; idim-- > 0;) {
+            ix = (index / stride) % shape[idim];
+            if (1 <= ix) update_neighbor(
+                index-stride, speeds, ndim, shape, delta, times, backpointers, heap);
+            if (ix+1 < shape[idim]) update_neighbor(
+                index+stride, speeds, ndim, shape, delta, times, backpointers, heap);
+            stride *= shape[idim];
+        }
+    }
+
+    free(backpointers);
     heap_delete(heap);
 
     return SUCCESS;
-};
-
+}
 
 static PyObject* w_eikonal_solver_fmm_cartesian(PyObject *m, PyObject *args) {
     eikonal_error_t err;
-    PyObject *speeds_arr, *times_arr, *deltas_arr;
+    PyObject *speeds_arr, *times_arr;
     int ndim, i;
     npy_intp shape[3], size;
     size_t size_t_shape[3];
-    double *speeds, *deltas, *times;
+    double *speeds, *times, delta;
 
     struct module_state *st = GETSTATE(m);
 
-    if (!PyArg_ParseTuple(args, "OOO", &speeds_arr, &times_arr, &deltas_arr)) {
-        PyErr_SetString(st->error, "usage: eikonal_solver_fmm_cartesian(speeds, times, deltas)" );
+    if (!PyArg_ParseTuple(args, "OOd", &speeds_arr, &times_arr, &delta)) {
+        PyErr_SetString(
+            st->error,
+            "usage: eikonal_solver_fmm_cartesian(speeds, times, delta)");
         return NULL;
     }
 
     if (!good_array(speeds_arr, NPY_FLOAT64, -1, -1, NULL)) return NULL;
     ndim = PyArray_NDIM((PyArrayObject*)speeds_arr);
-    if (!(2 <= ndim && ndim <= 3)) {
-        PyErr_SetString(st->error, "only 2 and 3 dimensional inputs are supported.");
+    if (!(2 <= ndim && ndim <= NDIM_MAX)) {
+        PyErr_SetString(
+            st->error,
+            "invalid-dimensional input");
         return NULL;
     }
 
@@ -210,17 +357,17 @@ static PyObject* w_eikonal_solver_fmm_cartesian(PyObject *m, PyObject *args) {
     }
 
     if (!good_array(times_arr, NPY_FLOAT64, size, ndim, shape)) return NULL;
-    if (!good_array(deltas_arr, NPY_FLOAT64, ndim, 1, NULL)) return NULL;
 
     speeds = (double*)PyArray_DATA((PyArrayObject*)speeds_arr);
     times = (double*)PyArray_DATA((PyArrayObject*)times_arr);
-    deltas = (double*)PyArray_DATA((PyArrayObject*)deltas_arr);
 
     for (i=0; i<ndim; i++) {
         size_t_shape[i] = shape[i];
     }
 
-    err = eikonal_solver_fmm_cartesian(speeds, (size_t)ndim, size_t_shape, deltas, times);
+    err = eikonal_solver_fmm_cartesian(
+        speeds, (size_t)ndim, size_t_shape, delta, times);
+
     if (SUCCESS != err) {
         PyErr_SetString(st->error, eikonal_error_names[err]);
         return NULL;

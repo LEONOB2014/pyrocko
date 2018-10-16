@@ -24,9 +24,26 @@ class GFEikonalTestCase(unittest.TestCase):
 
         speeds = num.zeros((0, 0))
         times = num.zeros((0, 0))
-        deltas = num.array([1., 1.])
+        delta = 1.0
 
-        eikonal_ext.eikonal_solver_fmm_cartesian(speeds, times, deltas)
+        eikonal_ext.eikonal_solver_fmm_cartesian(speeds, times, delta)
+
+    def test_mini(self):
+
+        nx, ny = 101, 101
+        speeds = num.ones((ny, nx))
+        times = num.zeros((ny, nx)) - 1.0
+        times[ny//2, nx//2] = 0.0;
+        delta = 1.0
+
+        eikonal_ext.eikonal_solver_fmm_cartesian(speeds, times, delta)
+
+        from matplotlib import pyplot as plt
+
+        x = num.arange(nx) * delta
+        y = num.arange(ny) * delta
+        plt.contourf(x, y, times)
+        plt.show()
 
 
 if __name__ == '__main__':
