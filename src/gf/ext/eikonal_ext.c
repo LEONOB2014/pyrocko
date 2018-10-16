@@ -89,7 +89,7 @@ const char* eikonal_error_names[] = {
 #define NDIM_MAX 3
 
 static const size_t FARAWAY = SIZE_MAX;
-static const size_t ALIVE = SIZE_MAX-1;
+static const size_t ALIVE = SIZE_MAX - 1;
 static const double THUGE = DBL_MAX;
 
 typedef struct {
@@ -203,7 +203,7 @@ static void heap_update(heap_t *heap, size_t index, double newkey, double *keys,
 
 static void update_neighbor(
         size_t index, double *speeds, size_t ndim, size_t *shape, double delta,
-        double *times, size_t *backpointers, heap_t *heap) {
+        double *times, size_t *backpointers, heap_t *heap, double tref) {
 
     double s1, s2, tnew, d;
     double tmins[NDIM_MAX];
@@ -233,7 +233,7 @@ static void update_neighbor(
     s2 = 0.0;
     ndim_eff = 0;
     for (idim=0; idim<ndim; idim++) {
-        if (tmins[idim] != THUGE) {
+        if (tmins[idim] <= tref + delta/speeds[index]) {
             s1 += tmins[idim];
             s2 += tmins[idim]*tmins[idim];
             ndim_eff += 1;
@@ -246,8 +246,8 @@ static void update_neighbor(
     if (d >= 0) {
         tnew = 1.0/ndim_eff * (s1+sqrt(d));
     } else {
-        tnew = 0.0;
-        printf("hups");
+        tnew = tref + delta/speeds[index];
+        printf("hups\n");
     }
     heap_update(heap, index, tnew, times, backpointers);
 }
@@ -286,24 +286,35 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
 
     nalive = 0;
     for (i=0; i<n; i++) {
-        if (times[i] < 0) {
+        if (times[i] < 0.0) {
             backpointers[i] = FARAWAY;
             times[i] = THUGE;
         } else {
             backpointers[i] = ALIVE;
             nalive += 1;
-            heap_push(heap, i, times, backpointers);
         }
     }
-
     if (nalive == 0) return NO_SEED_POINTS;
+
+    // initialize narrowband
+    for (index=0; index<n; index++) {
+        if (backpointers[index] == ALIVE) {
+            stride = 1;
+            for (idim=ndim; idim-- > 0;) {
+                ix = (index / stride) % shape[idim];
+                if (1 <= ix) update_neighbor(
+                    index-stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
+                if (ix+1 < shape[idim]) update_neighbor(
+                    index+stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
+                stride *= shape[idim];
+            }
+        }
+    }
 
     while (nalive < n) {
         index = heap_pop(heap, times, backpointers);
         if (index == SIZE_MAX) return HEAP_EMPTY;
         if (backpointers[index] != ALIVE) nalive += 1;
-
-        printf("pop: %zi %zi %f\n", index, nalive, times[index]);
 
         backpointers[index] = ALIVE;
 
@@ -311,9 +322,9 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
         for (idim=ndim; idim-- > 0;) {
             ix = (index / stride) % shape[idim];
             if (1 <= ix) update_neighbor(
-                index-stride, speeds, ndim, shape, delta, times, backpointers, heap);
+                index-stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
             if (ix+1 < shape[idim]) update_neighbor(
-                index+stride, speeds, ndim, shape, delta, times, backpointers, heap);
+                index+stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
             stride *= shape[idim];
         }
     }
