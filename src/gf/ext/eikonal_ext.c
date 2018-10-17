@@ -32,37 +32,58 @@ struct module_state {
 static struct module_state _state;
 #endif
 
-int good_array(PyObject* o, int typenum_want, npy_intp size_want, int ndim_want, npy_intp* shape_want) {
+int good_array(
+        PyObject* o,
+        int typenum_want,
+        npy_intp size_want,
+        int ndim_want,
+        npy_intp* shape_want) {
+
     int i;
 
     if (!PyArray_Check(o)) {
-        PyErr_SetString(PyExc_AttributeError, "not a NumPy array" );
+        PyErr_SetString(
+            PyExc_AttributeError,
+            "not a NumPy array" );
         return 0;
     }
 
     if (PyArray_TYPE((PyArrayObject*)o) != typenum_want) {
-        PyErr_SetString(PyExc_AttributeError, "array of unexpected type");
+        PyErr_SetString(
+            PyExc_AttributeError,
+            "array of unexpected type");
         return 0;
     }
 
     if (!PyArray_ISCARRAY((PyArrayObject*)o)) {
-        PyErr_SetString(PyExc_AttributeError, "array is not contiguous or not well behaved");
+        PyErr_SetString(
+            PyExc_AttributeError,
+            "array is not contiguous or not well behaved");
         return 0;
     }
 
     if (size_want != -1 && size_want != PyArray_SIZE((PyArrayObject*)o)) {
-        PyErr_SetString(PyExc_AttributeError, "array is of unexpected size");
+        PyErr_SetString(
+            PyExc_AttributeError,
+            "array is of unexpected size");
         return 0;
     }
     if (ndim_want != -1 && ndim_want != PyArray_NDIM((PyArrayObject*)o)) {
-        PyErr_SetString(PyExc_AttributeError, "array is of unexpected ndim");
+        PyErr_SetString(
+            PyExc_AttributeError,
+            "array is of unexpected ndim");
         return 0;
     }
 
     if (ndim_want != -1 && shape_want != NULL) {
         for (i=0; i<ndim_want; i++) {
-            if (shape_want[i] != -1 && shape_want[i] != PyArray_DIMS((PyArrayObject*)o)[i]) {
-                PyErr_SetString(PyExc_AttributeError, "array is of unexpected shape");
+            if (shape_want[i] != -1
+                    && shape_want[i] != PyArray_DIMS((PyArrayObject*)o)[i]) {
+
+                PyErr_SetString(
+                    PyExc_AttributeError,
+                    "array is of unexpected shape");
+
                 return 0;
             }
         }
@@ -76,6 +97,7 @@ typedef enum {
     HEAP_FULL = 2,
     HEAP_EMPTY = 3,
     NO_SEED_POINTS = 4,
+    CHECK_RESULTS = 5,
 } eikonal_error_t;
 
 const char* eikonal_error_names[] = {
@@ -84,6 +106,7 @@ const char* eikonal_error_names[] = {
     "heap capacity exhausted",
     "heap drained prematurely",
     "no seeding points given",
+    "uexpected/untested code executed, please check results",
 };
 
 #define NDIM_MAX 3
@@ -98,7 +121,7 @@ typedef struct {
     size_t nmax;
 } heap_t;
 
-static void swap(size_t *a, size_t *b) { 
+static void swap(size_t *a, size_t *b) {
     size_t t;
     t = *a;
     *a = *b;
@@ -127,50 +150,75 @@ static heap_t *heap_new(size_t nmax) {
     return heap;
 }
 
-
 static void heap_delete(heap_t *heap) {
     if (heap == NULL) return;
     if (heap->indices != NULL) free(heap->indices);
     free(heap);
 }
 
-static void heap_down(heap_t *heap, size_t index, double *keys, size_t *backpointers) {
+static void heap_down(
+        heap_t *heap,
+        size_t index,
+        double *keys,
+        size_t *backpointers) {
+
     size_t v, w;
     v = index;
     w = 2*v + 1;  /* first dscendant of v */
     while (w < heap->n) {
         /* if w has second descendant and it is greater take that one */
-        if (w+1 < heap->n && keys[heap->indices[w+1]] < keys[heap->indices[w]]) w = w + 1;
+        if (w+1 < heap->n && keys[heap->indices[w+1]] < keys[heap->indices[w]])
+            w = w + 1;
 
         /* w points to largest descendant */
-        if (keys[heap->indices[v]] < keys[heap->indices[w]]) return; /* v has heap property */
+        if (keys[heap->indices[v]] < keys[heap->indices[w]])
+            return; /* v has heap property */
 
-        swap(&(heap->indices[v]), &(heap->indices[w]));
-        swap(&(backpointers[heap->indices[v]]), &(backpointers[heap->indices[w]]));
+        swap(
+            &(heap->indices[v]),
+            &(heap->indices[w]));
+
+        swap(
+            &(backpointers[heap->indices[v]]),
+            &(backpointers[heap->indices[w]]));
 
         v = w;
         w = 2*v + 1;
     }
 }
 
-static void heap_up(heap_t *heap, size_t index, double *keys, size_t *backpointers) {
+static void heap_up(
+        heap_t *heap,
+        size_t index,
+        double *keys,
+        size_t *backpointers) {
+
     size_t v, u;
     v = index;
     while (v > 0) {
         u = (v-1)/2;  /* parent */
-        if (keys[heap->indices[u]] < keys[heap->indices[v]]) return; /* u has heap property */
+        if (keys[heap->indices[u]] < keys[heap->indices[v]])
+            return; /* u has heap property */
 
-        swap(&(heap->indices[v]), &(heap->indices[u]));
-        swap(&(backpointers[heap->indices[v]]), &(backpointers[heap->indices[u]]));
+        swap(
+            &(heap->indices[v]),
+            &(heap->indices[u]));
+        swap(
+            &(backpointers[heap->indices[v]]),
+            &(backpointers[heap->indices[u]]));
 
         v = u;
     }
 }
 
-static eikonal_error_t heap_push(heap_t *heap, size_t index, double *keys, size_t *backpointers) {
-    if (heap->n + 1 > heap->nmax) {
+static eikonal_error_t heap_push(
+        heap_t *heap,
+        size_t index,
+        double *keys,
+        size_t *backpointers) {
+
+    if (heap->n + 1 > heap->nmax)
         return HEAP_FULL;
-    }
 
     heap->n += 1;
     heap->indices[heap->n - 1] = index;
@@ -179,9 +227,15 @@ static eikonal_error_t heap_push(heap_t *heap, size_t index, double *keys, size_
     return SUCCESS;
 }
 
-static size_t heap_pop(heap_t *heap, double *keys, size_t *backpointers) {
+static size_t heap_pop(
+        heap_t *heap,
+        double *keys,
+        size_t *backpointers) {
+
     size_t index;
-    if (heap->n == 0) return SIZE_MAX;
+    if (heap->n == 0)
+        return SIZE_MAX;
+
     swap(&(heap->indices[0]), &(heap->indices[heap->n - 1]));
     swap(&(backpointers[heap->indices[0]]),
          &(backpointers[heap->indices[heap->n - 1]]));
@@ -191,27 +245,44 @@ static size_t heap_pop(heap_t *heap, double *keys, size_t *backpointers) {
     return index;
 }
 
-static void heap_update(heap_t *heap, size_t index, double newkey, double *keys, size_t *backpointers) {
+static void heap_update(
+        heap_t *heap,
+        size_t index,
+        double newkey,
+        double *keys,
+        size_t *backpointers) {
+
     double oldkey;
 
     oldkey = keys[index];
     keys[index] = newkey;
 
-    if (newkey < oldkey) heap_up(heap, backpointers[index], keys, backpointers);
-    if (newkey > oldkey) heap_down(heap, backpointers[index], keys, backpointers);
+    if (newkey < oldkey)
+        heap_up(heap, backpointers[index], keys, backpointers);
+
+    if (newkey > oldkey)
+        heap_down(heap, backpointers[index], keys, backpointers);
 }
 
-static void update_neighbor(
-        size_t index, double *speeds, size_t ndim, size_t *shape, double delta,
-        double *times, size_t *backpointers, heap_t *heap, double tref) {
+static eikonal_error_t update_neighbor(
+        size_t index,
+        double *speeds,
+        size_t ndim,
+        size_t *shape,
+        double delta,
+        double *times,
+        size_t *backpointers,
+        heap_t *heap,
+        double tref) {
 
     double s1, s2, tnew, d;
     double tmins[NDIM_MAX];
     size_t idim, ndim_eff, ix, stride;
+    eikonal_error_t retval;
 
     //printf("upd: %zi\n", index);
 
-    if (backpointers[index] == ALIVE) return;
+    if (backpointers[index] == ALIVE) return SUCCESS;
     if (backpointers[index] == FARAWAY) {
         heap_push(heap, index, times, backpointers);
     }
@@ -219,12 +290,17 @@ static void update_neighbor(
     stride = 1;
     for (idim=ndim; idim-- > 0;) {
         ix = (index / stride) % shape[idim];
-        //printf("ix: %zi %zi %zi %zi\n", index, stride, ix, shape[idim]);
         tmins[idim] = THUGE;
-        if (1 <= ix) tmins[idim] = 
-            (backpointers[index-stride] == ALIVE) ? times[index-stride] : THUGE;
-        if (ix+1 < shape[idim]) tmins[idim] = min(tmins[idim],
-            (backpointers[index+stride] == ALIVE) ? times[index+stride] : THUGE);
+
+        if (1 <= ix)
+            tmins[idim] = (backpointers[index-stride] == ALIVE)
+                ? times[index-stride] : THUGE;
+
+        if (ix+1 < shape[idim])
+            tmins[idim] = min(
+                tmins[idim],
+                (backpointers[index+stride] == ALIVE)
+                    ? times[index+stride] : THUGE);
 
         stride *= shape[idim];
     }
@@ -240,16 +316,60 @@ static void update_neighbor(
         }
     }
 
-    // check for abs(tmins[ia] - tmins[ib]) <= deltah/speed
-    
+    retval = SUCCESS;
     d = s1*s1 - ndim_eff*(s2-delta*delta/(speeds[index]*speeds[index]));
     if (d >= 0) {
         tnew = 1.0/ndim_eff * (s1+sqrt(d));
     } else {
+        // Should rarely get here if problem is well behaved. It might not be 
+        // neccessary to return an error. Needs testing.
+        retval = CHECK_RESULTS;
         tnew = tref + delta/speeds[index];
-        printf("hups\n");
     }
     heap_update(heap, index, tnew, times, backpointers);
+
+    return retval;
+}
+
+static eikonal_error_t update_neighbors(
+        size_t index,
+        double *speeds,
+        size_t ndim,
+        size_t *shape,
+        double delta,
+        double *times,
+        size_t *backpointers,
+        heap_t *heap) {
+
+    size_t idim;
+    size_t stride;
+    size_t ix;
+    eikonal_error_t retval, retval_temp;
+
+    retval = SUCCESS;
+    stride = 1;
+    for (idim=ndim; idim-- > 0;) {
+        ix = (index / stride) % shape[idim];
+
+        if (1 <= ix) {
+            retval_temp = update_neighbor(
+                index-stride, speeds, ndim, shape, delta, times, 
+                backpointers, heap, times[index]);
+
+            retval = retval || retval_temp;
+        }
+        if (ix+1 < shape[idim]) { 
+            retval_temp = update_neighbor(
+                index+stride, speeds, ndim, shape, delta, times,
+                backpointers, heap, times[index]);
+
+            retval = retval || retval_temp;
+        }
+
+        stride *= shape[idim];
+    }
+
+    return retval;
 }
 
 static eikonal_error_t eikonal_solver_fmm_cartesian(
@@ -265,14 +385,15 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
     size_t *backpointers;
     size_t nalive;
     size_t index;
-    size_t stride;
-    size_t ix;
+    eikonal_error_t retval, retval_temp;
+
+    retval = SUCCESS;
 
     n = 1;
     for (idim=0; idim<ndim; idim++) {
         n *= shape[idim];
     }
-    
+
     heap = heap_new(n);
     if (heap == NULL) {
         return MALLOC_FAILED;
@@ -288,7 +409,6 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
     for (i=0; i<n; i++) {
         if (times[i] < 0.0) {
             backpointers[i] = FARAWAY;
-            times[i] = THUGE;
         } else {
             backpointers[i] = ALIVE;
             nalive += 1;
@@ -299,18 +419,15 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
     // initialize narrowband
     for (index=0; index<n; index++) {
         if (backpointers[index] == ALIVE) {
-            stride = 1;
-            for (idim=ndim; idim-- > 0;) {
-                ix = (index / stride) % shape[idim];
-                if (1 <= ix) update_neighbor(
-                    index-stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
-                if (ix+1 < shape[idim]) update_neighbor(
-                    index+stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
-                stride *= shape[idim];
-            }
+            retval_temp = update_neighbors(
+                index, speeds, ndim, shape, delta, times, 
+                backpointers, heap);
+
+            retval = retval || retval_temp;
         }
     }
 
+    // fast marching
     while (nalive < n) {
         index = heap_pop(heap, times, backpointers);
         if (index == SIZE_MAX) return HEAP_EMPTY;
@@ -318,24 +435,23 @@ static eikonal_error_t eikonal_solver_fmm_cartesian(
 
         backpointers[index] = ALIVE;
 
-        stride = 1;
-        for (idim=ndim; idim-- > 0;) {
-            ix = (index / stride) % shape[idim];
-            if (1 <= ix) update_neighbor(
-                index-stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
-            if (ix+1 < shape[idim]) update_neighbor(
-                index+stride, speeds, ndim, shape, delta, times, backpointers, heap, times[index]);
-            stride *= shape[idim];
-        }
+        retval_temp = update_neighbors(
+            index, speeds, ndim, shape, delta, times, 
+            backpointers, heap);
+
+        retval = retval || retval_temp;
     }
 
     free(backpointers);
     heap_delete(heap);
 
-    return SUCCESS;
+    return retval;
 }
 
-static PyObject* w_eikonal_solver_fmm_cartesian(PyObject *m, PyObject *args) {
+static PyObject* w_eikonal_solver_fmm_cartesian(
+        PyObject *m,
+        PyObject *args) {
+
     eikonal_error_t err;
     PyObject *speeds_arr, *times_arr;
     int ndim, i;
@@ -354,10 +470,12 @@ static PyObject* w_eikonal_solver_fmm_cartesian(PyObject *m, PyObject *args) {
 
     if (!good_array(speeds_arr, NPY_FLOAT64, -1, -1, NULL)) return NULL;
     ndim = PyArray_NDIM((PyArrayObject*)speeds_arr);
-    if (!(2 <= ndim && ndim <= NDIM_MAX)) {
-        PyErr_SetString(
+    if (!(1 <= ndim && ndim <= NDIM_MAX)) {
+        PyErr_Format(
             st->error,
-            "invalid-dimensional input");
+            "Only 1 to %i dimensional inputs have been tested. Set NDIM_MAX "
+            "in eikonal_ext.c and recompile to try higher dimensions.",
+            NDIM_MAX);
         return NULL;
     }
 
@@ -389,9 +507,12 @@ static PyObject* w_eikonal_solver_fmm_cartesian(PyObject *m, PyObject *args) {
 }
 
 static PyMethodDef eikonal_ext_methods[] = {
-    {"eikonal_solver_fmm_cartesian",  w_eikonal_solver_fmm_cartesian, METH_VARARGS,
-        "Solve eikonal equation using the fast marching method." },
-
+    {
+        "eikonal_solver_fmm_cartesian",
+        w_eikonal_solver_fmm_cartesian,
+        METH_VARARGS,
+        "Solve eikonal equation using the fast marching method."
+    },
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
@@ -444,7 +565,9 @@ initeikonal_ext(void)
         INITERROR;
     struct module_state *st = GETSTATE(module);
 
-    st->error = PyErr_NewException("pyrocko.gf.eikonal_ext.EikonalExtError", NULL, NULL);
+    st->error = PyErr_NewException(
+        "pyrocko.gf.eikonal_ext.EikonalExtError", NULL, NULL);
+
     if (st->error == NULL) {
         Py_DECREF(module);
         INITERROR;
@@ -457,4 +580,3 @@ initeikonal_ext(void)
     return module;
 #endif
 }
-
