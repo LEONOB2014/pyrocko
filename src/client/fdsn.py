@@ -22,7 +22,7 @@ except ImportError:
     from urllib.error import HTTPError
 
 from pyrocko import util
-
+from pyrocko import config
 
 logger = logging.getLogger('pyrocko.client.fdsn')
 
@@ -53,7 +53,10 @@ g_site_abbr = {
 
 g_default_site = 'geofon'
 
-g_timeout = 20.
+if config.config().fdsn_timeout is None:
+    g_timeout = 20.
+else:
+    g_timeout = config.config().fdsn_timeout
 
 re_realm_from_auth_header = re.compile(r'(realm)\s*[:=]\s*"([^"]*)"?')
 
@@ -104,13 +107,14 @@ class InvalidRequest(Exception):
 
 def _request(url, post=False, user=None, passwd=None,
              allow_TLSv1=False, **kwargs):
+    timeout = float(kwargs.pop('timeout', g_timeout))
     url_values = urlencode(kwargs)
     if url_values:
         url += '?' + url_values
-    logger.debug('Accessing URL %s' % url)
 
+    logger.debug('Accessing URL %s' % url)
     url_args = {
-        'timeout': g_timeout
+        'timeout': timeout
     }
 
     if allow_TLSv1:

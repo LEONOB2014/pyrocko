@@ -24,7 +24,7 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install
 
 packname = 'pyrocko'
-version = '2018.09.28'
+version = '2018.11.06'
 
 
 class NotInAGitRepos(Exception):
@@ -47,9 +47,8 @@ def git_infos():
     sha1 = q(['git', 'log', '--pretty=oneline', '-n1']).split()[0]
     sha1 = re.sub(br'[^0-9a-f]', '', sha1)
     sha1 = str(sha1.decode('ascii'))
-    sstatus = q(['git', 'status'])
-    local_modifications = bool(re.search(br'^#\s+modified:', sstatus,
-                                         flags=re.M))
+    sstatus = q(['git', 'status', '--porcelain', '-uno'])
+    local_modifications = bool(sstatus.strip())
     return sha1, local_modifications
 
 
@@ -595,7 +594,7 @@ setup(
     name=packname,
     version=version,
     description='A versatile seismology toolkit for Python.',
-    long_description=open('README.md', 'r').read(),
+    long_description=open('README.md', 'rb').read().decode('utf8'),
     long_description_content_type='text/markdown',
     author='The Pyrocko Developers',
     author_email='info@pyrocko.org',
@@ -686,6 +685,13 @@ setup(
             extra_compile_args=['-D_FILE_OFFSET_BITS=64', '-Wextra'] + omp_arg,
             extra_link_args=[] + omp_lib,
             sources=[op.join('src', 'gf', 'ext', 'store_ext.c')]),
+
+        Extension(
+            'eikonal_ext',
+            include_dirs=[get_python_inc(), numpy.get_include()],
+            extra_compile_args=['-Wextra'] + omp_arg,
+            extra_link_args=[] + omp_lib,
+            sources=[op.join('src', 'ext', 'eikonal_ext.c')]),
 
         Extension(
             'parstack_ext',

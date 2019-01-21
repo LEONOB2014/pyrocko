@@ -9,8 +9,7 @@ import numpy as num
 
 from pyrocko.guts import Object, Int, Bool, Float
 from pyrocko import orthodrome as od
-from pyrocko.dataset import gshhg
-from pyrocko import topo
+from pyrocko.dataset import gshhg, topo
 
 logger = logging.getLogger('pyrocko.scenario.base')
 
@@ -35,7 +34,7 @@ class ScenarioError(Exception):
     pass
 
 
-def is_on_land(lat, lon, method='topo'):
+def is_on_land(lat, lon, method='coastlines'):
     if method == 'topo':
         elevation = topo.elevation(lat, lon)
         if elevation is None:

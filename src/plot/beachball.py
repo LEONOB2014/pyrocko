@@ -16,6 +16,7 @@ from matplotlib.transforms import Transform
 from matplotlib.colors import LinearSegmentedColormap
 
 from pyrocko import moment_tensor as mtm
+from pyrocko.util import num_full
 
 logger = logging.getLogger('pyrocko.plot.beachball')
 
@@ -581,7 +582,7 @@ def mts2amps(mts, projection, beachball_type, grid_resolution=200, mask=True):
     vecs2[:, 1] = num.repeat(y, nx)
 
     ii_ok = vecs2[:, 0]**2 + vecs2[:, 1]**2 <= 1.0
-    amps = num.full(nx * ny, num.nan, dtype=num.float)
+    amps = num_full(nx * ny, num.nan, dtype=num.float)
 
     amps[ii_ok] = 0.
     for mt in mts:
@@ -624,7 +625,8 @@ def plot_fuzzy_beachball_mpl_pixmap(
         alpha=1.0,
         projection='lambert',
         size_units='data',
-        grid_resolution=200):
+        grid_resolution=200,
+        method='imshow'):
     '''
     Plot fuzzy beachball from a list of given MomentTensors
 
@@ -638,13 +640,11 @@ def plot_fuzzy_beachball_mpl_pixmap(
         polygons are not plotted
 
     See plot_beachball_mpl for other arguments
-
-    .. note: The related axes should only be saved as raster image (e.g. png)
-             otherwise output might be looking unexpected!
     '''
     if size_units == 'points':
         raise BeachballError(
-            'size_units="points" not supported in plot_beachball_mpl_pixmap')
+            'size_units="points" not supported in '
+            'plot_fuzzy_beachball_mpl_pixmap')
 
     transform, position, size = choose_transform(
         axes, size_units, position, size)
@@ -661,13 +661,29 @@ def plot_fuzzy_beachball_mpl_pixmap(
         'dummy', [color_p, color_t], N=ncolors)
 
     levels = num.linspace(0, 1., ncolors)
-    axes.contourf(
-        position[0] + y * size, position[1] + x * size, amps.T,
-        levels=levels,
-        cmap=cmap,
-        transform=transform,
-        zorder=zorder,
-        alpha=alpha)
+    if method == 'contourf':
+        axes.contourf(
+            position[0] + y * size, position[1] + x * size, amps.T,
+            levels=levels,
+            cmap=cmap,
+            transform=transform,
+            zorder=zorder,
+            alpha=alpha)
+
+    elif method == 'imshow':
+        axes.imshow(
+            amps.T,
+            extent=(
+                position[0] + y[0] * size,
+                position[0] + y[-1] * size,
+                position[1] - x[0] * size,
+                position[1] - x[-1] * size),
+            cmap=cmap,
+            transform=transform,
+            zorder=zorder-0.1,
+            alpha=alpha)
+    else:
+        assert False, 'invalid `method` argument'
 
     # draw optimum edges
     if best_mt is not None:
