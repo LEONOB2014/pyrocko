@@ -128,7 +128,7 @@ class ScatterPipe(object):
         prop = act.GetProperty()
         prop.SetPointSize(10)
         try:
-            prop.SetRenderPointsAsSpheres(True)
+            prop.SetRenderPointsAsSpheres(False)
         except AttributeError:
             logger.warn(
                 'Cannot render points as sphere with this version of VTK')

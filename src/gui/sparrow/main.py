@@ -125,6 +125,7 @@ class Viewer(qw.QMainWindow):
         qw.QMainWindow.__init__(self)
 
         self._panel_togglers = {}
+        self._actors = set()
 
         mbar = self.menuBar()
         menu = mbar.addMenu('File')
@@ -266,7 +267,9 @@ class Viewer(qw.QMainWindow):
                 self._elements[estate] = element
 
     def add_actor(self, actor):
-        self.ren.AddActor(actor)
+        if actor not in self._actors:
+            self.ren.AddActor(actor)
+            self._actors.add(actor)
 
     def add_actor_list(self, actorlist):
         for actor in actorlist:
@@ -274,6 +277,7 @@ class Viewer(qw.QMainWindow):
 
     def remove_actor(self, actor):
         self.ren.RemoveActor(actor)
+        self._actors.remove(actor)
 
     def update_view(self):
         self.vtk_widget.update()
@@ -298,8 +302,8 @@ class Viewer(qw.QMainWindow):
 
         if self.rotating:
             self.do_rotate(x, y, x0, y0, center_x, center_y)
-        elif self.zooming:
-            self.do_dolly(x, y, x0, y0, center_x, center_y)
+        # elif self.zooming:
+        #     self.do_dolly(x, y, x0, y0, center_x, center_y)
 
     def mouse_wheel_event_forward(self, obj, event):
         self.do_dolly(-1.0)

@@ -5,22 +5,112 @@
 
 from __future__ import absolute_import, print_function, division
 
+import calendar
 import numpy as num
 
 from pyrocko.guts import \
     Object, Bool, Float, StringChoice, String, List
 
+from pyrocko.himesh import HiMesh
 from pyrocko import cake, table, model
 from pyrocko.client import fdsn
 from pyrocko.gui.qt_compat import qw, qc, fnpatch
 
-from pyrocko.gui.vtk_util import ScatterPipe
+from pyrocko.gui.vtk_util import ScatterPipe, TrimeshPipe
 from .. import common
 from pyrocko import geometry
 
 from .base import Element, ElementState
 
 guts_prefix = 'sparrow'
+
+
+attribute_names = [
+    'time', 'lat', 'lon', 'northing', 'easting', 'depth', 'magnitude']
+
+attribute_dtypes = [
+    'f16', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8']
+
+name_to_icol = dict(
+    (name, icol) for (icol, name) in enumerate(attribute_names))
+
+event_dtype = num.dtype(list(zip(attribute_names, attribute_dtypes)))
+
+t_time = num.float
+
+
+def binned_statistic(values, ibins, function):
+    order = num.argsort(ibins)
+    values_sorted = values[order]
+    ibins_sorted = ibins[order]
+    parts = num.concatenate((
+        [0],
+        num.where(num.diff(ibins_sorted) != 0)[0] + 1,
+        [ibins.size]))
+
+    results = []
+    ibins_result = []
+    for ilow, ihigh in zip(parts[:-1], parts[1:]):
+        values_part = values_sorted[ilow:ihigh]
+        results.append(function(values_part))
+        ibins_result.append(ibins_sorted[ilow])
+
+    return ibins_result, results
+
+
+def load_text(
+        filepath,
+        column_names=('time', 'lat', 'lon', 'depth', 'magnitude'),
+        time_format='seconds'):
+
+    with open(filepath, 'r') as f:
+        if column_names == 'from_header':
+            line = f.readline()
+            column_names = line.split()
+
+        name_to_icol_in = dict(
+            (name, icol) for (icol, name) in enumerate(column_names)
+            if name in attribute_names)
+
+    data_in = num.loadtxt(filepath, skiprows=1)
+
+    nevents = data_in.shape[0]
+    data = num.zeros(nevents, dtype=event_dtype)
+
+    for icol, name in enumerate(column_names):
+        icol_in = name_to_icol_in.get(name, None)
+        if icol_in is not None:
+            if name == 'time':
+                if time_format == 'seconds':
+                    data[name] = data_in[:, icol_in]
+                elif time_format == 'year':
+                    data[name] = decimal_year_to_time(data_in[:, icol_in])
+                else:
+                    assert False, 'invalid time_format'
+            else:
+                data[name] = data_in[:, icol_in]
+
+    return data
+
+
+def decimal_year_to_time(year):
+    iyear_start = num.floor(year).astype(num.int)
+    iyear_end = iyear_start + 1
+
+    iyear_min = num.min(iyear_start)
+    iyear_max = num.max(iyear_end)
+
+    iyear_to_time = num.zeros(iyear_max - iyear_min + 1, dtype=t_time)
+    for iyear in range(iyear_min, iyear_max+1):
+        iyear_to_time[iyear-iyear_min] = calendar.timegm(
+            (iyear, 1, 1, 0, 0, 0))
+
+    tyear_start = iyear_to_time[iyear_start - iyear_min]
+    tyear_end = iyear_to_time[iyear_end - iyear_min]
+
+    t = tyear_start + (year - iyear_start) * (tyear_end - tyear_start)
+
+    return t
 
 
 def events_to_points(events):
@@ -74,6 +164,24 @@ class FileCatalogSelection(CatalogSelection):
         return events
 
 
+class FileCatalogSelection2(CatalogSelection):
+    paths = List.T(String.T())
+
+    def get_points(self):
+        for path in self.paths:
+            data = load_text(
+                path, column_names='from_header', time_format='year')
+
+            latlondepth = num.zeros((data.shape[0], 3))
+            latlondepth[:, 0] = data['lat']
+            latlondepth[:, 1] = data['lon']
+            latlondepth[:, 2] = data['depth'] * 1000.
+
+            return geometry.latlondepth2xyz(
+                latlondepth,
+                planetradius=cake.earthradius)
+
+
 class CatalogState(ElementState):
     visible = Bool.T(default=True)
     size = Float.T(default=5.0)
@@ -95,6 +203,7 @@ class CatalogElement(Element):
         Element.__init__(self)
         self._parent = None
         self._pipe = None
+        self._mesh = None
         self._controls = None
         self._points = num.array([])
 
@@ -106,6 +215,7 @@ class CatalogElement(Element):
         state.add_listener(upd, 'catalog_selection')
         self._state = state
         self._current_selection = None
+        self._himesh = HiMesh(order=2)
 
     def unbind_state(self):
         self._listeners = []
@@ -126,6 +236,10 @@ class CatalogElement(Element):
                 self._parent.remove_actor(self._pipe.actor)
                 self._pipe = None
 
+            if self._mesh:
+                self._parent.remove_actor(self._mesh.actor)
+                self._mesh = None
+
             if self._controls:
                 self._parent.remove_panel(self._controls)
                 self._controls = None
@@ -138,22 +252,44 @@ class CatalogElement(Element):
         if self._pipe and \
                 self._current_selection is not state.catalog_selection:
 
+            self._current_selection = None
             self._parent.remove_actor(self._pipe.actor)
+            self._parent.remove_actor(self._mesh.actor)
             self._pipe = None
+            self._mesh = None
 
-        if self._pipe and not state.visible:
-            self._parent.remove_actor(self._pipe.actor)
-            self._pipe.set_size(state.size)
+        if not state.visible:
+            if self._pipe:
+                self._parent.remove_actor(self._pipe.actor)
 
-        if state.visible:
+        else:
             if self._current_selection is not state.catalog_selection:
-                events = state.catalog_selection.get_events()
-                points = events_to_points(events)
+                points = state.catalog_selection.get_points()
+
+                ifaces = self._himesh.points_to_faces(points)
+                ifaces_max = num.max(ifaces)
+                colors = num.random.random((ifaces_max+1, 3))
+
+                ifaces_x, sizes = binned_statistic(ifaces, ifaces, lambda part: part.shape[0])
+                print(ifaces_x, sizes)
+
+                vertices = self._himesh.get_vertices()
+                faces = self._himesh.get_faces()
+
+                self._mesh = TrimeshPipe(vertices, faces)
+
+                colors2 = colors[ifaces, :]
+
                 self._pipe = ScatterPipe(points)
-                self._parent.add_actor(self._pipe.actor)
+                self._pipe.set_colors(colors2)
+                self._current_selection = state.catalog_selection
 
             if self._pipe:
+                self._parent.add_actor(self._pipe.actor)
                 self._pipe.set_size(state.size)
+
+            if self._mesh:
+                self._parent.add_actor(self._mesh.actor)
 
         self._parent.update_view()
 
@@ -163,7 +299,7 @@ class CatalogElement(Element):
         fns, _ = fnpatch(qw.QFileDialog.getOpenFileNames(
             self._parent, caption, options=common.qfiledialog_options))
 
-        self._state.catalog_selection = FileCatalogSelection(
+        self._state.catalog_selection = FileCatalogSelection2(
             paths=[str(fn) for fn in fns])
 
     def _get_controls(self):
@@ -181,11 +317,9 @@ class CatalogElement(Element):
                 qw.QSizePolicy(
                     qw.QSizePolicy.Expanding, qw.QSizePolicy.Fixed))
             slider.setMinimum(0)
-            slider.setMaximum(10)
-            slider.setSingleStep(0.5)
-            slider.setPageStep(0.5)
+            slider.setMaximum(100)
             layout.addWidget(slider, 0, 1)
-            state_bind_slider(self, self._state, 'size', slider)
+            state_bind_slider(self, self._state, 'size', slider, factor=0.1)
 
             lab = qw.QLabel('Load from:')
             pb_file = qw.QPushButton('File')
