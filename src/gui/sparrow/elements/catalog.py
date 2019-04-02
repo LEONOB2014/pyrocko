@@ -7,6 +7,7 @@ from __future__ import absolute_import, print_function, division
 
 import calendar
 import numpy as num
+import copy
 
 from pyrocko.guts import \
     Object, Bool, Float, StringChoice, String, List
@@ -15,6 +16,7 @@ from pyrocko.himesh import HiMesh
 from pyrocko import cake, table, model
 from pyrocko.client import fdsn
 from pyrocko.gui.qt_compat import qw, qc, fnpatch
+from pyrocko import automap
 
 from pyrocko.gui.vtk_util import ScatterPipe, TrimeshPipe
 from .. import common
@@ -215,7 +217,20 @@ class CatalogElement(Element):
         state.add_listener(upd, 'catalog_selection')
         self._state = state
         self._current_selection = None
-        self._himesh = HiMesh(order=2)
+        self._himesh = HiMesh(order=9)
+        cpt_data = [
+            (0.0, 0.0, 0.0, 0.0),
+            (0.5, 0.5, 0.3, 0.3),
+            (1.0, 0.5, 0.5, 0.3)]
+
+        self.cpt = automap.CPT(
+            levels=[
+                automap.CPTLevel(
+                    vmin=a[0],
+                    vmax=b[0],
+                    color_min=[255*x for x in a[1:]],
+                    color_max=[255*x for x in b[1:]])
+                for (a, b) in zip(cpt_data[:-1], cpt_data[1:])])
 
     def unbind_state(self):
         self._listeners = []
@@ -266,17 +281,28 @@ class CatalogElement(Element):
             if self._current_selection is not state.catalog_selection:
                 points = state.catalog_selection.get_points()
 
+                print(num.sum(points.shape[0]))
                 ifaces = self._himesh.points_to_faces(points)
                 ifaces_max = num.max(ifaces)
                 colors = num.random.random((ifaces_max+1, 3))
 
-                ifaces_x, sizes = binned_statistic(ifaces, ifaces, lambda part: part.shape[0])
+                ifaces_x, sizes = binned_statistic(
+                    ifaces, ifaces, lambda part: part.shape[0])
+
+                print(num.sum(sizes))
                 print(ifaces_x, sizes)
 
                 vertices = self._himesh.get_vertices()
+                vertices *= 0.95
                 faces = self._himesh.get_faces()
 
-                self._mesh = TrimeshPipe(vertices, faces)
+                values = num.zeros(faces.shape[0])
+                values[ifaces_x] = sizes
+
+                self._mesh = TrimeshPipe(vertices, faces, values=values)
+                cpt = copy.deepcopy(self.cpt)
+                cpt.scale(0., num.max(sizes))
+                self._mesh.set_cpt(cpt)
 
                 colors2 = colors[ifaces, :]
 
