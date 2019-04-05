@@ -220,7 +220,7 @@ class OkadaTestCase(unittest.TestCase):
 
         if show_plot:
             import matplotlib.pyplot as plt
-            from mpl_toolkits.mplot3d import Axes3D
+            from mpl_toolkits.mplot3d import Axes3D # noqa
 
             fig = plt.figure()
             ax = fig.add_subplot(1, 1, 1, projection='3d')
@@ -313,7 +313,7 @@ class OkadaTestCase(unittest.TestCase):
 
         if show_plot:
             import matplotlib.pyplot as plt
-            from mpl_toolkits.mplot3d import Axes3D
+            from mpl_toolkits.mplot3d import Axes3D # noqa
 
             def add_subplot(fig, ntot, n, param, title, **kwargs):
                 ax = fig.add_subplot(ntot, 1, n, projection='3d')
@@ -543,6 +543,7 @@ class OkadaTestCase(unittest.TestCase):
             add_subplot(fig, 3, 3, '$u_{normal}$', 2, typ='scatter')
             plt.show()
 
+            
 if __name__ == '__main__':
     util.setup_logging('test_okada', 'warning')
     unittest.main()
