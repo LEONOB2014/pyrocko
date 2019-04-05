@@ -1,6 +1,8 @@
 import numpy as num
 
+
 km = 1000.
+
 
 def draw(
         dislocation,
